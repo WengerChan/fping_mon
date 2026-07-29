@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual env
+.venv/
+venv/
+
+# Local data and logs
+data/
+*.log
+*.db
+*.db-wal
+*.db-shm
+
+# Coverage / build artifacts
+.coverage
+htmlcov/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Local secrets / overrides
+.env
+.env.*
+*.local.yaml
+*.bak

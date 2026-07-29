@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Generate Python 3.12 venv
+        run: uv venv .venv --python 3.12
+      - name: Install Pacakges to venv
+        run: uv pip install --python .venv/bin/python -e ".[dev]"
+      - name: Run ruff
+        run: .venv/bin/python -m ruff check src tests || true
+      - name: Run pytest
+        run: .venv/bin/python -m pytest -q

@@ -1,0 +1,73 @@
+# Example Prometheus alert rules for fping-monitor itself.
+#
+# The exporter scrapes the container over the configured port (default
+# 9100) and Prometheus applies these rules. Thresholds assume the
+# default probe interval of 10s; widen them if you slow the cadence.
+
+groups:
+  - name: fping-monitor-self
+    rules:
+      - alert: FpingMonitorAbsent
+        expr: absent(up{job="fping-monitor"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "fping-monitor metrics endpoint is not being scraped"
+
+      - alert: FpingMonitorProbeStalled
+        expr: time() - fping_monitor_last_probe_completion_timestamp_seconds > 30
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "fping-monitor probe loop has stopped or is severely delayed"
+
+      - alert: FpingMonitorProbeErrors
+        expr: increase(fping_monitor_probe_rounds_total{result="error"}[5m]) >= 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fping-monitor probe rounds are erroring repeatedly"
+
+      - alert: FpingMonitorNotificationBacklog
+        expr: fping_monitor_notification_queue_size > 0
+          and fping_monitor_notification_oldest_pending_age_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fping-monitor notification queue is stuck"
+
+      - alert: FpingMonitorNotificationDeadLetters
+        expr: fping_monitor_notification_dead_letters > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "fping-monitor has notifications that can no longer be sent"
+
+      - alert: FpingMonitorStorageUnhealthy
+        expr: fping_monitor_storage_healthy == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "fping-monitor SQLite outbox is unreachable"
+
+      - alert: FpingMonitorNoTargets
+        expr: fping_monitor_targets == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fping-monitor has no targets loaded"
+
+      - alert: FpingMonitorMassFailureProtection
+        expr: fping_monitor_mass_failure_protection_active == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "fping-monitor is suppressing per-host alerts due to mass failure"

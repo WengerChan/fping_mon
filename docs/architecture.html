@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>fping-monitor 架构图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f5f0;
+    --card: #ffffff;
+    --line: #e9e3d6;
+    --line-soft: #f0eadc;
+    --ink: #14171e;
+    --ink-2: #3a4256;
+    --muted: #7c7a72;
+    --primary: #2f6f5e;
+    --primary-soft: #d6e7e0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 48px 28px 80px; }
+  h1.serif {
+    font-family: 'DM Serif Display', serif; font-weight: 400;
+    font-size: 30px; letter-spacing: -.01em; line-height: 1.15; margin: 0 0 10px;
+  }
+  h2 {
+    font-family: 'DM Serif Display', serif; font-weight: 400;
+    font-size: 21px; letter-spacing: -.005em;
+    margin: 44px 0 10px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--line); color: var(--ink);
+  }
+  p { margin: 0 0 12px; color: var(--ink-2); }
+  ul { margin: 8px 0 16px; padding-left: 24px; color: var(--ink-2); }
+  li { margin: 4px 0; }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+  code { background: var(--line-soft); padding: 1px 6px; border-radius: 4px; color: var(--ink); }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--primary);
+    margin-bottom: 6px;
+  }
+  .eyebrow::before { content: ""; width: 18px; height: 1px; background: var(--primary); }
+  .lede { font-size: 16px; color: var(--ink-2); max-width: 720px; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .mermaid {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px 16px; margin: 14px 0 18px;
+    text-align: center; overflow-x: auto;
+  }
+  table { border-collapse: collapse; margin: 12px 0 18px; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px dashed var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  td code { font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  nav.toc {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 18px; margin: 28px 0 36px;
+    font-size: 14px;
+  }
+  nav.toc strong { color: var(--muted); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+  nav.toc ol { margin: 8px 0 0; padding-left: 22px; }
+  nav.toc a { color: var(--ink-2); }
+  footer {
+    margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 12px;
+  }
+  @media (max-width: 760px) {
+    .wrap { padding: 32px 18px 60px; }
+    h1.serif { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">架构图</span>
+    <h1 class="serif">fping-monitor</h1>
+    <p class="lede">
+      本页是 <a href="architecture.md">docs/architecture.md</a> 的浏览器版本，6 张 Mermaid 图通过 CDN 渲染。
+      节点文本里的 <code>src/...</code> 相对路径是 GitHub 风格的代码链接。
+    </p>
+  </header>
+
+  <nav class="toc">
+    <strong>目录</strong>
+    <ol>
+      <li><a href="#s1">部署/进程视图</a></li>
+      <li><a href="#s2">容器内模块视图</a></li>
+      <li><a href="#s3">探测主循环调用链</a></li>
+      <li><a href="#s4">通知投递调用链</a></li>
+      <li><a href="#s5">HTTP 与健康检查视图</a></li>
+      <li><a href="#s6">状态机迁移图</a></li>
+      <li><a href="#s7">模块速查表</a></li>
+      <li><a href="#s8">阅读建议</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="s1">1. 部署/进程视图</h2>
+<pre class="mermaid">flowchart LR
+    subgraph container["fping-monitor 容器 (非 root + NET_RAW)"]
+        P["Python 主进程&lt;br/&gt;python -m fping_monitor"]
+        F["/usr/bin/fping 5.x&lt;br/&gt;(setcap cap_net_raw+ep)"]
+        DB[("/var/lib/fping-monitor/state.db&lt;br/&gt;SQLite WAL")]
+    end
+
+    subgraph host["宿主机 / 同网段"]
+        PROM["Prometheus&lt;br/&gt;(抓取 :9100/metrics)"]
+        ALERT["告警接口&lt;br/&gt;POST /api/v1/events"]
+    end
+
+    T["被监控目标 × N&lt;br/&gt;(ICMP)"]
+
+    P -- "asyncio.to_thread" --&gt; F
+    P &lt;-- "读写" --&gt; DB
+    P -- "/metrics 9100/tcp" --&gt; PROM
+    P -- "HTTPS POST + Bearer" --&gt; ALERT
+    F -- "ICMP echo" --&gt; T
+    PROM -. "rules → Alertmanager" .-&gt; ALERT
+</pre>
+
+  <p>要点：</p>
+  <ul>
+    <li>fping 需要 <code>CAP_NET_RAW</code> 才能发 ICMP；通过 <code>setcap</code> 让非 root 用户也能用，无需 root 进程。</li>
+    <li>SQLite 状态文件必须挂载持久卷，否则容器重启会丢失未发送告警。</li>
+    <li>Prometheus 走 Pull；如果业务侧已经部署 Alertmanager，可让它负责告警去重、分组与抑制。</li>
+  </ul>
+
+  <h2 id="s2">2. 容器内模块视图</h2>
+<pre class="mermaid">flowchart TB
+    main["__main__.py: main()"] --&gt; app_run
+    app_run["app.py: Application.run()"] --&gt; sched_loop
+    app_run --&gt; http_start
+    app_run --&gt; worker_start
+    app_run --&gt; stats_task
+
+    sched_loop["scheduler.py: Scheduler.run_forever()"] --&gt; probe_once
+    http_start["api.py: MetricsHTTPServer.start()"]
+    worker_start["outbox.py: OutboxWorker.start()"]
+    stats_task["app.py: Application._publish_outbox_stats()"]
+
+    probe_once["scheduler.py: Scheduler.probe_once()"] --&gt; prober
+    probe_once --&gt; metrics_probe
+    probe_once --&gt; state_apply
+    probe_once --&gt; metrics_state
+    probe_once --&gt; notify_send
+
+    prober["probes.py: probe_targets()"] --&gt; fping["fping 子进程&lt;br/&gt;-C 3 -q -t 1000 -p 200"]
+    metrics_probe["metrics.py: MetricsStore.update_probe_results()"]
+    state_apply["state.py: StateManager.apply()"]
+    metrics_state["metrics.py: MetricsStore.update_host_state() / record_state_change()"]
+    notify_send["outbox.py: OutboxNotifier.send()"] --&gt; outbox_db["storage.py: Outbox.enqueue()"]
+
+    worker_loop["outbox.py: OutboxWorker.run_forever()"] --&gt; drain
+    drain["outbox.py: OutboxWorker.drain_once()"] --&gt; deliver
+    deliver["outbox.py: OutboxWorker._deliver()"] --&gt; webhook
+    webhook["notifications.py: WebhookNotifier.send()"] --&gt; remote["外部告警接口"]
+</pre>
+
+  <p>模块速记（按职责）：</p>
+  <table>
+    <thead><tr><th style="width:30%">角色</th><th>主要文件</th></tr></thead>
+    <tbody>
+      <tr><td>入口与装配</td><td><a href="../src/fping_monitor/__main__.py"><code>__main__.py</code></a>, <a href="../src/fping_monitor/app.py"><code>app.py</code></a></td></tr>
+      <tr><td>探测</td><td><a href="../src/fping_monitor/probes.py"><code>probes.py</code></a></td></tr>
+      <tr><td>状态机</td><td><a href="../src/fping_monitor/state.py"><code>state.py</code></a></td></tr>
+      <tr><td>指标</td><td><a href="../src/fping_monitor/metrics.py"><code>metrics.py</code></a></td></tr>
+      <tr><td>通知传输</td><td><a href="../src/fping_monitor/notifications.py"><code>notifications.py</code></a></td></tr>
+      <tr><td>Outbox</td><td><a href="../src/fping_monitor/storage.py"><code>storage.py</code></a>, <a href="../src/fping_monitor/outbox.py"><code>outbox.py</code></a></td></tr>
+      <tr><td>HTTP 端点</td><td><a href="../src/fping_monitor/api.py"><code>api.py</code></a></td></tr>
+      <tr><td>数据模型</td><td><a href="../src/fping_monitor/models.py"><code>models.py</code></a></td></tr>
+      <tr><td>配置</td><td><a href="../src/fping_monitor/config.py"><code>config.py</code></a></td></tr>
+      <tr><td>日志</td><td><a href="../src/fping_monitor/logging.py"><code>logging.py</code></a></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="s3">3. 探测主循环调用链</h2>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant M as __main__: main()
+    participant A as app: Application
+    participant S as scheduler: Scheduler
+    participant P as probes: probe_targets
+    participant F as fping 子进程
+    participant MS as metrics: MetricsStore
+    participant ST as state: StateManager
+    participant ON as outbox: OutboxNotifier
+    participant DB as storage: Outbox
+
+    M-&gt;&gt;A: bootstrap(config) → Application.run()
+    A-&gt;&gt;S: scheduler.run_forever()
+    loop 每 interval_seconds
+        S-&gt;&gt;S: probe_once()
+        S-&gt;&gt;MS: mark_probe_round_start()
+        loop 按 batch_size 切片
+            S-&gt;&gt;P: asyncio.to_thread(probe_targets, batch)
+            P-&gt;&gt;F: subprocess.run(fping -C 3 -q -t 1000 -p 200 …)
+            F--&gt;&gt;P: stdout (每目标一行)
+            P--&gt;&gt;S: dict[target_id, ProbeResult]
+            S-&gt;&gt;MS: update_probe_results(results)
+            S-&gt;&gt;MS: record_fping_process(...)
+        end
+        S-&gt;&gt;ST: apply(all_results)
+        ST--&gt;&gt;S: list[StateChange]
+        S-&gt;&gt;MS: record_state_change / update_host_state
+        Note over S: 计算 failed_ratio&lt;br/&gt;仅当 total &gt;= 5 时启用 mass-failure 保护
+        alt mass_failure=False
+            loop 每个 change.event
+                S-&gt;&gt;ON: await send(event)
+                ON-&gt;&gt;DB: enqueue(event)  [to_thread]
+            end
+        else mass_failure=True
+            Note over S: 跳过所有 host_down 通知&lt;br/&gt;只更新状态与指标
+        end
+        S-&gt;&gt;MS: mark_probe_round_complete(duration, result)
+    end
+</pre>
+
+  <p>要点：</p>
+  <ul>
+    <li><code>probe_targets</code> 通过 <code>asyncio.to_thread</code> 跑在默认线程池，不阻塞事件循环。</li>
+    <li>fping 子进程有整体超时（<code>overall_timeout</code>），避免极端情况下拖死整轮。</li>
+    <li><code>mass_failure</code> 保护默认只在 ≥ 5 台主机的批次上触发，避免单台离线被误判为监控节点问题。</li>
+    <li>状态机 <code>apply</code> 在一帧内顺序消费所有结果；如果需要"每轮 N 个成功才确认 UP"，把多轮结果连续灌入即可。</li>
+  </ul>
+
+  <h2 id="s4">4. 通知投递调用链</h2>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant S as scheduler: Scheduler.probe_once
+    participant ON as outbox: OutboxNotifier
+    participant DB as storage: Outbox (SQLite WAL)
+    participant W as outbox: OutboxWorker
+    participant H as notifications: WebhookNotifier
+    participant R as 告警接收端
+
+    S-&gt;&gt;ON: await send(event)
+    ON-&gt;&gt;DB: enqueue(event) [asyncio.to_thread]
+    Note over DB: 唯一索引 event_id 保证幂等
+
+    loop worker poll tick
+        W-&gt;&gt;DB: claim_due() (status=pending, next_attempt_at&lt;=now)
+        DB--&gt;&gt;W: list[StoredEvent] (in_flight)
+        loop 每个 row
+            W-&gt;&gt;H: await transport.send(event)
+            alt 2xx
+                H--&gt;&gt;W: OK
+                W-&gt;&gt;DB: mark_delivered(row_id)
+            else 4xx (不可重试)
+                H--&gt;&gt;W: raise NotificationFailed
+                W-&gt;&gt;DB: mark_dead(row_id, error)
+            else 5xx / transport (可重试)
+                loop attempts &lt; max_attempts
+                    H--&gt;&gt;W: retryable
+                end
+                H--&gt;&gt;W: raise RetriesExhausted
+                W-&gt;&gt;DB: mark_retry(row_id, backoff, error)
+            end
+        end
+    end
+    H-&gt;&gt;R: HTTPS POST (Bearer $ALERT_API_TOKEN)
+</pre>
+
+  <p>要点：</p>
+  <ul>
+    <li><code>NotificationFailed</code>：单次响应即放弃（典型 4xx），不再排队。</li>
+    <li><code>RetriesExhausted</code>：5xx / 传输错误在线用尽 <code>max_attempts</code> 后抛出，worker 写入更长 backoff 再次调度。</li>
+    <li>进程崩溃时遗留的 <code>in_flight</code> 行会在 <code>Outbox.__init__</code> 里通过 <code>reclaim_in_flight()</code> 回到 <code>pending</code>，不丢事件。</li>
+    <li><code>_publish_outbox_stats</code> 每 5 秒刷新 outbox 指标（队列长度、dead 数、最旧 pending 时长）。</li>
+  </ul>
+
+  <h2 id="s5">5. HTTP 与健康检查视图</h2>
+<pre class="mermaid">flowchart LR
+    subgraph h["api.py: MetricsHTTPServer (后台线程)"]
+        h_metrics["GET /metrics"] --&gt; gen["prometheus_client.generate_latest(REGISTRY)"]
+        h_health["GET /healthz"] --&gt; ok["固定 200, 返回 ok"]
+        h_ready["GET /readyz"] --&gt; rc["app: _build_ready_check() 闭包"]
+        rc --&gt; check1{"round_count &gt; 0 ?"}
+        check1 -- 否 --&gt; notready["503 reason=尚未完成任何探测轮次"]
+        check1 -- 是 --&gt; check2{"now - last_round_completed_at &lt;= max(interval*2, 60) ?"}
+        check2 -- 否 --&gt; stale["503 reason=最近一轮探测距今 N s（deadline M s）"]
+        check2 -- 是 --&gt; ready["200 reason=ok"]
+    end
+
+    P["Prometheus"] -- scrape_9100 --&gt; h_metrics
+    K8S["k8s 健康检查"] -- http_healthz --&gt; h_health
+    LB["LB 探针"] -- http_readyz --&gt; h_ready
+</pre>
+
+  <p>要点：</p>
+  <ul>
+    <li><code>/healthz</code> 只证明 HTTP 进程在跑，不反映探测是否健康。</li>
+    <li><code>/readyz</code> 才会判断"最近一轮是否在 2× interval 内完成"；<code>docker compose</code> 的 healthcheck 与 Prometheus 的 <code>up</code> 指标应当指向 <code>/healthz</code>。</li>
+    <li>当 <code>notification.enabled=false</code> 时，outbox 表依然存在但 worker 不启动；此时 <code>fping_monitor_notification_queue_size</code> 始终为 0。</li>
+  </ul>
+
+  <h2 id="s6">6. 状态机迁移图</h2>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; UNKNOWN
+    UNKNOWN --&gt; UP: 连续 3 次成功&lt;br/&gt;(up_after_successes)
+    UNKNOWN --&gt; DOWN: 连续 3 次失败&lt;br/&gt;(down_after_failures)
+    UP --&gt; DOWN: 连续 3 次失败
+    DOWN --&gt; UP: 连续 3 次成功
+
+    note right of UP
+        进入 UP 时若 previous=UNKNOWN
+        -&gt; 不产生任何通知（冷启动）
+    end note
+
+    note right of DOWN
+        进入 DOWN: 分配/复用 incident_id&lt;br/&gt;产生 event_type=host_down
+    end note
+
+    note left of DOWN
+        DOWN → UP: 复用 incident_id&lt;br/&gt;产生 event_type=host_recovered
+    end note
+</pre>
+
+  <p>实现位置：<a href="../src/fping_monitor/state.py"><code>state.py:StateManager.apply</code></a>。</p>
+
+  <h2 id="s7">7. 模块速查表</h2>
+  <table>
+    <thead>
+      <tr><th>模块</th><th>文件</th><th>关键导出</th><th>角色</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>配置加载</td><td><a href="../src/fping_monitor/config.py"><code>config.py</code></a></td><td><code>load_config</code>, <code>AppConfig</code>, <code>ConfigError</code></td><td>解析 YAML，校验 target/threshold/标签白名单</td></tr>
+      <tr><td>领域模型</td><td><a href="../src/fping_monitor/models.py"><code>models.py</code></a></td><td><code>Target</code>, <code>ProbeResult</code>, <code>AlertEvent</code></td><td>跨模块共享的纯 dataclass</td></tr>
+      <tr><td>日志</td><td><a href="../src/fping_monitor/logging.py"><code>logging.py</code></a></td><td><code>configure_logging</code></td><td>统一 stdout JSON-ish 格式</td></tr>
+      <tr><td>fping 探针</td><td><a href="../src/fping_monitor/probes.py"><code>probes.py</code></a></td><td><code>parse_fping_output</code>, <code>probe_targets</code>, <code>build_fping_command</code></td><td>子进程调用与解析</td></tr>
+      <tr><td>状态机</td><td><a href="../src/fping_monitor/state.py"><code>state.py</code></a></td><td><code>StateManager</code>, <code>HostState</code>, <code>StateChange</code>, <code>HostStatus</code></td><td>连续成功/失败计数 + 状态迁移</td></tr>
+      <tr><td>Prometheus 指标</td><td><a href="../src/fping_monitor/metrics.py"><code>metrics.py</code></a></td><td><code>MetricsStore</code>, <code>get_default_store</code></td><td>全部 <code>fping_monitor_*</code> 指标</td></tr>
+      <tr><td>通知传输</td><td><a href="../src/fping_monitor/notifications.py"><code>notifications.py</code></a></td><td><code>WebhookNotifier</code>, <code>NotificationFailed</code>, <code>RetriesExhausted</code></td><td>Webhook POST + 重试</td></tr>
+      <tr><td>SQLite Outbox</td><td><a href="../src/fping_monitor/storage.py"><code>storage.py</code></a></td><td><code>Outbox</code>, <code>StoredEvent</code></td><td>WAL outbox 单表</td></tr>
+      <tr><td>Outbox 适配层</td><td><a href="../src/fping_monitor/outbox.py"><code>outbox.py</code></a></td><td><code>OutboxNotifier</code>, <code>OutboxWorker</code></td><td>把事件写盘 + 后台消费</td></tr>
+      <tr><td>调度器</td><td><a href="../src/fping_monitor/scheduler.py"><code>scheduler.py</code></a></td><td><code>Scheduler</code></td><td>主循环、mass-failure 抑制、状态机调用</td></tr>
+      <tr><td>HTTP 端点</td><td><a href="../src/fping_monitor/api.py"><code>api.py</code></a></td><td><code>MetricsHTTPServer</code>, <code>make_handler</code></td><td><code>/metrics</code> <code>/healthz</code> <code>/readyz</code></td></tr>
+      <tr><td>应用装配</td><td><a href="../src/fping_monitor/app.py"><code>app.py</code></a></td><td><code>Application</code>, <code>bootstrap</code>, <code>_build_ready_check</code></td><td>全部依赖装配 + SIGHUP reload</td></tr>
+      <tr><td>入口</td><td><a href="../src/fping_monitor/__main__.py"><code>__main__.py</code></a></td><td><code>main</code></td><td>argparse + 信号处理</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="s8">8. 阅读建议</h2>
+  <ol>
+    <li>想搞清楚"如何配置" → 看 <a href="../src/fping_monitor/config.py"><code>config.py</code></a> 与 <code>config/config.example.yaml</code>。</li>
+    <li>想搞清楚"如何探测" → 看 <a href="../src/fping_monitor/probes.py"><code>probes.py</code></a> + 真实 <code>fping 5.x</code> 文档。</li>
+    <li>想搞清楚"如何判断上下线" → 看 <a href="../src/fping_monitor/state.py"><code>state.py</code></a> 的 <code>apply</code> / <code>_next_status</code>。</li>
+    <li>想搞清楚"如何保证通知不丢" → 看 <a href="../src/fping_monitor/storage.py"><code>storage.py</code></a> + <a href="../src/fping_monitor/outbox.py"><code>outbox.py</code></a>。</li>
+    <li>想搞清楚"启动流程" → 看 <a href="../src/fping_monitor/app.py"><code>app.py:bootstrap</code></a> + <a href="../src/fping_monitor/__main__.py"><code>__main__.py:main</code></a>。</li>
+  </ol>
+  <p>更深入的设计动机写在 <a href="../arch.md"><code>arch.md</code></a>，使用说明写在 <a href="usage.md"><code>docs/usage.md</code></a>。</p>
+
+  <footer>
+    本页是 <a href="architecture.md"><code>docs/architecture.md</code></a> 的浏览器版本。Mermaid 图由 jsDelivr CDN 渲染，首次打开需要联网。
+  </footer>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    themeVariables: {
+      fontFamily: "'Outfit', 'PingFang SC', sans-serif",
+      primaryColor: '#fbfaf6',
+      primaryTextColor: '#14171e',
+      primaryBorderColor: '#2f6f5e',
+      lineColor: '#7c7a72',
+      fontSize: '13px',
+    },
+    flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true },
+    sequence:  { useMaxWidth: true, actorMargin: 60, noteMargin: 12 },
+    stateDiagram: { useMaxWidth: true },
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+name: docker-image
+
+on:
+  push:
+    tags: [ "v*" ]
+
+jobs:
+  build-and-push-to-ghcr-io:
+    runs-on: ubuntu-latest
+    
+    permissions: 
+      contents: read
+      packages: write
+      id-token: write
+    
+    steps:
+    - uses: actions/checkout@v4
+    - name: Login to ghcr.io
+      uses: docker/login-action@v4.5.2
+      with:
+        registry: ghcr.io
+        username: ${{github.actor}}
+        password: ${{secrets.GITHUB_TOKEN}}
+    - name: Generate image tag
+      id: image-tag
+      uses: docker/metadata-action@v6.2.0
+      with:
+        images: ghcr.io/${{github.repository_owner}}/fping-monitor
+        tags: ${{github.ref_name}}
+        flavor: latest=auto
+    - name: Setup Buildx
+      uses: docker/setup-buildx-action@v4.2.0
+      with:
+        platforms: linux/amd64,linux/arm64
+    - name: Build and push images
+      id: build-and-push
+      uses: docker/build-push-action@v7.3.0
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{steps.image-tag.outputs.tags}}
+        labels: ${{steps.image-tag.outputs.labels}}
+        provenance: true
+        sbom: true
+
