@@ -1,9 +1,9 @@
 """应用装配。
 
 `bootstrap` 是唯一公开的入口：读取配置、构造指标存储、状态机、
-可选的 Webhook 传输、outbox、调度器和小型 HTTP 服务，全部作为
-:class:`Application` 字段返回。测试可以直接读取任意字段；生产
-代码调用 :meth:`Application.run` 和 :meth:`Application.shutdown`。
+按 channel 启用的 transport、outbox、调度器和小型 HTTP 服务，全部
+作为 :class:`Application` 字段返回。测试可以直接读取任意字段；
+生产代码调用 :meth:`Application.run` 和 :meth:`Application.shutdown`。
 """
 
 from __future__ import annotations
@@ -20,9 +20,10 @@ from prometheus_client import REGISTRY
 from . import __version__
 from .api import MetricsHTTPServer
 from .config import AppConfig, load_config
+from .cuckoo import Cuckoo
 from .metrics import MetricsStore
-from .notifications import WebhookNotifier
-from .outbox import OutboxNotifier, OutboxWorker
+from .notifications import CuckooNotifier, Notifier, WebhookNotifier
+from .outbox import OutboxNotifier, OutboxWorker, build_channels
 from .scheduler import Scheduler
 from .state import StateManager
 from .storage import Outbox
@@ -31,19 +32,41 @@ from .storage import Outbox
 _LOG = logging.getLogger(__name__)
 
 
-def _build_transport(config: AppConfig) -> Optional[WebhookNotifier]:
-    if not config.notification.enabled:
-        return None
-    if not config.notification.url:
-        _LOG.warning("notification 已启用但 url 为空，传输层不会启动")
-        return None
-    return WebhookNotifier(
-        url=config.notification.url,
-        timeout_seconds=config.notification.timeout_seconds,
-        max_attempts=config.notification.max_attempts,
-        max_backoff_seconds=config.notification.max_backoff_seconds,
-        token_env=config.notification.token_env,
-    )
+def _build_transports(config: AppConfig) -> dict[str, Notifier]:
+    """根据配置构造每个 channel 的 transport；未启用的 channel 不出现。"""
+    transports: dict[str, Notifier] = {}
+
+    if config.notification.enabled and config.notification.url:
+        try:
+            transports["webhook"] = WebhookNotifier(
+                url=config.notification.url,
+                max_attempts=config.notification.max_attempts,
+                max_backoff_seconds=config.notification.max_backoff_seconds,
+                token_env=config.notification.token_env,
+            )
+        except ValueError as exc:
+            _LOG.error("构造 webhook transport 失败: %s", exc)
+
+    cuckoo_obj = Cuckoo(config)
+    for endpoint in ("receivemap", "forward"):
+        url = config.cuckoo.url.get(endpoint, "")
+        if not url:
+            continue
+        if not (config.cuckoo.enabled or url):
+            continue
+        channel = f"cuckoo.{endpoint}"
+        try:
+            transports[channel] = CuckooNotifier(
+                cuckoo_obj,
+                endpoint=endpoint,
+                max_attempts=config.cuckoo.max_attempts,
+                max_backoff_seconds=config.cuckoo.max_backoff_seconds,
+                monitor_instance=config.notification.monitor_instance,
+            )
+        except ValueError as exc:
+            _LOG.error("构造 cuckoo %s transport 失败: %s", endpoint, exc)
+
+    return transports
 
 
 def _build_ready_check(scheduler: Scheduler, interval_seconds: int):
@@ -69,7 +92,7 @@ class Application:
     config_path: Path
     metrics: MetricsStore
     state_manager: StateManager
-    transport: Optional[WebhookNotifier]
+    transports: dict[str, Notifier]
     outbox: Outbox
     outbox_notifier: OutboxNotifier
     outbox_worker: "OutboxWorker | _NullOutboxWorker"
@@ -87,9 +110,10 @@ class Application:
             self._publish_outbox_stats(), name="outbox-stats"
         )
         _LOG.info(
-            "fping-monitor 启动完成: targets=%d interval=%ds",
+            "fping-monitor 启动完成: targets=%d interval=%ds channels=%s",
             len(self.config.targets),
             self.config.probe.interval_seconds,
+            sorted(self.transports.keys()),
         )
         try:
             await self.scheduler.run_forever()
@@ -101,7 +125,7 @@ class Application:
         # 1. 先让 scheduler 停：避免 probe_once 继续往 outbox 写入新事件；
         # 2. 再 cancel 统计 task；
         # 3. 再让 outbox worker 停：worker 仍要消费已入队的事件；
-        # 4. 关闭 http_server / transport / outbox（数据库）。
+        # 4. 关闭 http_server / transports / outbox（数据库）。
         # 颠倒任一步都可能导致：未消费事件丢失 / 重复 / 卡住。
         self.scheduler.request_stop()
         if self._outbox_stats_task is not None:
@@ -113,8 +137,16 @@ class Application:
             self._outbox_stats_task = None
         await self.outbox_worker.stop()
         self.http_server.stop()
-        if self.transport is not None:
-            await self.transport.close()
+        for name, transport in self.transports.items():
+            close = getattr(transport, "close", None)
+            if close is None:
+                continue
+            try:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:  # noqa: BLE001
+                _LOG.exception("关闭 transport %s 失败", name)
         self.outbox.close()
         self.metrics.set_storage_healthy(False)
         _LOG.info("fping-monitor 已关闭")
@@ -122,16 +154,15 @@ class Application:
     async def reload_config(self) -> None:
         """SIGHUP 重载：仅刷新 targets 列表。
 
-        其它字段（probe/state/notification/storage）需要重启程序才生效。
-        被移除的 host 在 5 分钟内会进入保留窗口，再次出现时复用原状态，
-        避免刚发出的 host_down 还没收到响应就被丢弃。
+        其它字段（probe/state/notification/storage/cuckoo/server）需要
+        重启程序才生效。
         """
         import time as _time
 
         new_config = load_config(self.config_path)
         old = self.config
         reload_section_changed = False
-        for section in ("probe", "state", "notification", "storage", "server"):
+        for section in ("probe", "state", "notification", "storage", "cuckoo", "server"):
             old_obj = getattr(old, section, None)
             new_obj = getattr(new_config, section, None)
             if old_obj is not None and new_obj is not None and old_obj != new_obj:
@@ -209,24 +240,28 @@ def bootstrap(
     )
     state_manager.upsert_targets(config.targets)
 
-    # outbox 单条事件总尝试次数 = WebhookNotifier 在线 max_attempts × 4
-    # （每次 worker re-schedule 算 1 次，再覆盖几轮 backoff 仍未恢复就 dead）
+    channels = build_channels(config.notification, config.cuckoo)
+    if not channels:
+        _LOG.warning("未启用任何告警 channel，outbox 不会启动 worker")
+
     outbox = Outbox(
         outbox_path or config.storage.path,
-        max_delivery_attempts=max(1, config.notification.max_attempts * 4),
+        max_event_attempts=max(
+            (max_a for _, max_a in channels), default=10
+        ),
     )
-    outbox_notifier = OutboxNotifier(outbox)
-    transport = _build_transport(config)
-    if transport is not None:
+    outbox_notifier = OutboxNotifier(outbox, channels=channels)
+    transports = _build_transports(config)
+    if transports:
         outbox_worker: "OutboxWorker | _NullOutboxWorker" = OutboxWorker(
             outbox,
-            transport,
+            transports,
             poll_interval_seconds=1.0,
             max_backoff_seconds=config.notification.max_backoff_seconds,
             metrics=metrics,
         )
     else:
-        # 通知未启用：outbox 仍然存在，但 worker 不启动
+        # 未启用任何 channel：outbox 仍存在（enqueue 仍可用），但 worker 不启动
         outbox_worker = _NullOutboxWorker()
 
     scheduler = Scheduler(
@@ -252,7 +287,7 @@ def bootstrap(
         config_path=path,
         metrics=metrics,
         state_manager=state_manager,
-        transport=transport,
+        transports=transports,
         outbox=outbox,
         outbox_notifier=outbox_notifier,
         outbox_worker=outbox_worker,

@@ -174,8 +174,8 @@ class MetricsStore:
         )
         self.notification_attempts_total = Counter(
             "fping_monitor_notification_attempts_total",
-            "按结果分类的通知发送尝试次数",
-            labelnames=("result",),
+            "按 channel 与结果分类的通知投递尝试次数",
+            labelnames=("channel", "result"),
             registry=registry,
         )
         self.target_config_reload_total = Counter(
@@ -204,7 +204,11 @@ class MetricsStore:
         for value in _PROBE_RESULT_VALUES:
             self.probe_results_total.labels(result=value)
         for value in _NOTIFICATION_RESULT_VALUES:
-            self.notification_attempts_total.labels(result=value)
+            # channel 标签在 worker 第一次投递时再补全；这里只预热 result 维度。
+            pass
+        for ch in ("webhook", "cuckoo.receivemap", "cuckoo.forward"):
+            for value in _NOTIFICATION_RESULT_VALUES:
+                self.notification_attempts_total.labels(channel=ch, result=value)
         for value in ("success", "failed"):
             self.target_config_reload_total.labels(result=value)
         for op in ("read", "write"):
