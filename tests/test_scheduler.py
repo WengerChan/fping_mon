@@ -11,7 +11,7 @@ from prometheus_client import CollectorRegistry
 
 from fping_monitor.config import (
     AppConfig,
-    NotificationConfig,
+    WebhookConfig,
     ProbeConfig,
     StateConfig,
 )
@@ -25,7 +25,7 @@ def _config(down: int = 3, up: int = 3) -> AppConfig:
     return AppConfig(
         probe=ProbeConfig(interval_seconds=1, timeout_ms=200, packets=1, batch_size=2),
         state=StateConfig(down_after_failures=down, up_after_successes=up),
-        notification=NotificationConfig(enabled=True, url="http://localhost/hook"),
+        webhook=WebhookConfig(enabled=True, url="http://localhost/hook"),
     )
 
 
@@ -111,7 +111,7 @@ async def test_mass_failure_recovery_emits_pending_downs():
     cfg = AppConfig(
         probe=ProbeConfig(interval_seconds=1, timeout_ms=200, packets=1, batch_size=10),
         state=StateConfig(down_after_failures=1, up_after_successes=1, mass_failure_ratio=0.5),
-        notification=NotificationConfig(enabled=True, url="http://localhost/hook"),
+        webhook=WebhookConfig(enabled=True, url="http://localhost/hook"),
     )
     scheduler = _make_scheduler(cfg)
     targets = [Target(id=f"h{i}", address=f"10.0.0.{i}") for i in range(6)]

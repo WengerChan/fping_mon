@@ -173,7 +173,7 @@ class Scheduler:
 
         # 3. 转发事件（mass_failure 期间跳过 DOWN，同时清掉 state 上分配的
         #    incident_id，以便窗口解除后能识别出"从未真正发出过"的主机）
-        if self.notifier is not None and self.config.notification.enabled:
+        if self.notifier is not None and self.config.webhook.enabled:
             for change in changes:
                 if change.event is None:
                     continue
@@ -198,7 +198,7 @@ class Scheduler:
             prev_mass_failure_active
             and not mass_failure
             and self.notifier is not None
-            and self.config.notification.enabled
+            and self.config.webhook.enabled
         ):
             await self._emit_mass_failure_recovery_down()
 
@@ -230,7 +230,7 @@ class Scheduler:
                 consecutive_failures=state.consecutive_failures,
                 packet_loss_ratio=state.last_packet_loss_ratio,
                 probe_type="icmp",
-                monitor_instance=self.config.notification.monitor_instance,
+                monitor_instance=self.config.webhook.monitor_instance,
             )
             state.incident_id = event.incident_id
             try:

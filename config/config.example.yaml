@@ -21,19 +21,6 @@ state:
   up_after_successes: 3       # 连续成功多少轮才确认 UP
   mass_failure_ratio: 0.5     # 单轮失败目标占比超过该值视为大面积故障
 
-# Webhook 通知配置
-notification:
-  enabled: true                                       # 是否启用
-  url: https://alert.example.internal/api/v1/events   # 接收端 URL（http/https）
-  # transport 内 HTTP 重试上限：抗网络抖动，单次 worker tick 内最多发起这么多次请求
-  max_attempts: 3
-  # worker tick 上限：抗持续故障，整条事件最多被 outbox worker 调度这么多次
-  max_event_attempts: 10
-  # 单层退避封顶秒数（k8s 风格指数退避 + ±10% 抖动）
-  max_backoff_seconds: 60
-  token_env: ALERT_API_TOKEN                          # 持有 Bearer token 的环境变量名
-  monitor_instance: monitor-a                          # 随事件上报的监控实例标识
-
 # Outbox 存储位置
 storage:
   path: /var/lib/fping-monitor/state.db               # SQLite 文件路径
@@ -51,6 +38,19 @@ targets:
     labels:
       site: shanghai
       group: application
+
+# Webhook 通知配置
+webhook:
+  enabled: true                                       # 是否启用
+  url: https://alert.example.internal/api/v1/events   # 接收端 URL（http/https）
+  # transport 内 HTTP 重试上限：抗网络抖动，单次 worker tick 内最多发起这么多次请求
+  max_attempts: 3
+  # worker tick 上限：抗持续故障，整条事件最多被 outbox worker 调度这么多次
+  max_event_attempts: 10
+  # 单层退避封顶秒数（k8s 风格指数退避 + ±10% 抖动）
+  max_backoff_seconds: 60
+  token_env: ALERT_API_TOKEN                          # 持有 Bearer token 的环境变量名
+  monitor_instance: monitor-a                          # 随事件上报的监控实例标识
 
 # 布谷鸟告警通道
 cuckoo:

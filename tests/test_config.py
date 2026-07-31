@@ -23,7 +23,7 @@ state:
   up_after_successes: 3
   mass_failure_ratio: 0.4
 
-notification:
+webhook:
   enabled: true
   url: https://alert.example.invalid/api
   timeout_seconds: 3
@@ -61,8 +61,8 @@ def test_load_valid_config(tmp_path: Path):
     assert cfg.probe.interval_seconds == 5
     assert cfg.state.down_after_failures == 3
     assert cfg.state.up_after_successes == 3
-    assert cfg.notification.url == "https://alert.example.invalid/api"
-    assert cfg.notification.monitor_instance == "m1"
+    assert cfg.webhook.url == "https://alert.example.invalid/api"
+    assert cfg.webhook.monitor_instance == "m1"
     assert len(cfg.targets) == 2
     assert cfg.targets[0].id == "host-a"
     assert cfg.targets[0].labels == {"site": "shanghai", "group": "web"}
@@ -129,18 +129,18 @@ def test_empty_config(tmp_path: Path):
         load_config(_write(tmp_path, ""))
 
 
-def test_notification_url_must_be_http(tmp_path: Path):
+def test_webhook_url_must_be_http(tmp_path: Path):
     body = """
-notification:
+webhook:
   url: "ftp://example.invalid/hook"
 """
     with pytest.raises(ConfigError, match="http"):
         load_config(_write(tmp_path, body))
 
 
-def test_notification_url_missing_host(tmp_path: Path):
+def test_webhook_url_missing_host(tmp_path: Path):
     body = """
-notification:
+webhook:
   url: "https://"
 """
     with pytest.raises(ConfigError, match="主机名"):

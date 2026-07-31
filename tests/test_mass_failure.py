@@ -7,7 +7,7 @@ from prometheus_client import CollectorRegistry
 
 from fping_monitor.config import (
     AppConfig,
-    NotificationConfig,
+    WebhookConfig,
     ProbeConfig,
     StateConfig,
 )
@@ -25,7 +25,7 @@ def _config(down: int = 1, up: int = 1, mass: float = 0.5) -> AppConfig:
             up_after_successes=up,
             mass_failure_ratio=mass,
         ),
-        notification=NotificationConfig(enabled=True, url="http://localhost/hook"),
+        webhook=WebhookConfig(enabled=True, url="http://localhost/hook"),
     )
 
 

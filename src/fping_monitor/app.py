@@ -36,13 +36,13 @@ def _build_transports(config: AppConfig) -> dict[str, Notifier]:
     """根据配置构造每个 channel 的 transport；未启用的 channel 不出现。"""
     transports: dict[str, Notifier] = {}
 
-    if config.notification.enabled and config.notification.url:
+    if config.webhook.enabled and config.webhook.url:
         try:
             transports["webhook"] = WebhookNotifier(
-                url=config.notification.url,
-                max_attempts=config.notification.max_attempts,
-                max_backoff_seconds=config.notification.max_backoff_seconds,
-                token_env=config.notification.token_env,
+                url=config.webhook.url,
+                max_attempts=config.webhook.max_attempts,
+                max_backoff_seconds=config.webhook.max_backoff_seconds,
+                token_env=config.webhook.token_env,
             )
         except ValueError as exc:
             _LOG.error("构造 webhook transport 失败: %s", exc)
@@ -61,7 +61,7 @@ def _build_transports(config: AppConfig) -> dict[str, Notifier]:
                 endpoint=endpoint,
                 max_attempts=config.cuckoo.max_attempts,
                 max_backoff_seconds=config.cuckoo.max_backoff_seconds,
-                monitor_instance=config.notification.monitor_instance,
+                monitor_instance=config.webhook.monitor_instance,
             )
         except ValueError as exc:
             _LOG.error("构造 cuckoo %s transport 失败: %s", endpoint, exc)
@@ -154,7 +154,7 @@ class Application:
     async def reload_config(self) -> None:
         """SIGHUP 重载：仅刷新 targets 列表。
 
-        其它字段（probe/state/notification/storage/cuckoo/server）需要
+        其它字段（probe/state/webhook/storage/cuckoo/server）需要
         重启程序才生效。
         """
         import time as _time
@@ -162,7 +162,7 @@ class Application:
         new_config = load_config(self.config_path)
         old = self.config
         reload_section_changed = False
-        for section in ("probe", "state", "notification", "storage", "cuckoo", "server"):
+        for section in ("probe", "state", "webhook", "storage", "cuckoo", "server"):
             old_obj = getattr(old, section, None)
             new_obj = getattr(new_config, section, None)
             if old_obj is not None and new_obj is not None and old_obj != new_obj:
@@ -236,11 +236,11 @@ def bootstrap(
     state_manager = StateManager(
         down_after_failures=config.state.down_after_failures,
         up_after_successes=config.state.up_after_successes,
-        monitor_instance=config.notification.monitor_instance,
+        monitor_instance=config.webhook.monitor_instance,
     )
     state_manager.upsert_targets(config.targets)
 
-    channels = build_channels(config.notification, config.cuckoo)
+    channels = build_channels(config.webhook, config.cuckoo)
     if not channels:
         _LOG.warning("未启用任何告警 channel，outbox 不会启动 worker")
 
@@ -259,7 +259,7 @@ def bootstrap(
             outbox,
             transports,
             poll_interval_seconds=1.0,
-            max_backoff_seconds=config.notification.max_backoff_seconds,
+            max_backoff_seconds=config.webhook.max_backoff_seconds,
             metrics=metrics,
         )
     else:

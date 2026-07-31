@@ -13,7 +13,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from .config import CuckooConfig, NotificationConfig
+from .config import CuckooConfig, WebhookConfig
 from .metrics import MetricsStore
 from .models import AlertEvent
 from .notifications import (
@@ -243,7 +243,7 @@ class OutboxWorker:
 
 
 def build_channels(
-    notification: NotificationConfig,
+    webhook: WebhookConfig,
     cuckoo: CuckooConfig,
 ) -> list[tuple[str, int]]:
     """根据配置返回所有启用 channel 及其 max_event_attempts。
@@ -252,8 +252,8 @@ def build_channels(
     非空（或 enabled=True）的 channel。
     """
     channels: list[tuple[str, int]] = []
-    if notification.enabled and notification.url:
-        channels.append(("webhook", notification.max_event_attempts))
+    if webhook.enabled and webhook.url:
+        channels.append(("webhook", webhook.max_event_attempts))
     if cuckoo.enabled or cuckoo.url.get("receivemap"):
         if cuckoo.url.get("receivemap"):
             channels.append(("cuckoo.receivemap", cuckoo.max_event_attempts))

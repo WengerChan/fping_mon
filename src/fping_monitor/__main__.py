@@ -44,9 +44,9 @@ def main() -> int:
     asyncio.set_event_loop(loop)
 
     # 提醒：默认 monitor_instance 在多实例部署下需要唯一
-    if app.config.notification.monitor_instance == "monitor-a":
+    if app.config.webhook.monitor_instance == "monitor-a":
         _LOG.warning(
-            "notification.monitor_instance 仍是示例默认值 'monitor-a'，"
+            "webhook.monitor_instance 仍是示例默认值 'monitor-a'，"
             "如果部署多个监控节点，请改成唯一标识（如 hostname）"
         )
 

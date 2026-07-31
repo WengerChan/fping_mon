@@ -83,7 +83,7 @@ class StateConfig:
 
 
 @dataclass
-class NotificationConfig:
+class WebhookConfig:
     """Webhook 通知通道配置。
 
     Attributes:
@@ -146,7 +146,7 @@ class AppConfig:
         server: HTTP 服务。
         probe: 探测循环。
         state: 状态机阈值。
-        notification: Webhook 通道。
+        webhook: Webhook 通道。
         storage: Outbox 存储。
         targets: 监控目标列表（唯一必填段）。
         cuckoo: 布谷鸟通道。
@@ -154,7 +154,7 @@ class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     probe: ProbeConfig = field(default_factory=ProbeConfig)
     state: StateConfig = field(default_factory=StateConfig)
-    notification: NotificationConfig = field(default_factory=NotificationConfig)
+    webhook: WebhookConfig = field(default_factory=WebhookConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     targets: list[Target] = field(default_factory=list)
     cuckoo: CuckooConfig = field(default_factory=CuckooConfig)
@@ -221,11 +221,11 @@ def _parse_state(raw: Optional[dict]) -> StateConfig:
     return cfg
 
 
-def _parse_notification(raw: Optional[dict]) -> NotificationConfig:
-    """解析 ``notification`` 段，并对 ``url`` 做 scheme/netloc 校验。"""
+def _parse_webhook(raw: Optional[dict]) -> WebhookConfig:
+    """解析 ``webhook`` 段，并对 ``url`` 做 scheme/netloc 校验。"""
     if raw is None:
-        return NotificationConfig()
-    cfg = NotificationConfig(
+        return WebhookConfig()
+    cfg = WebhookConfig(
         enabled=bool(raw.get("enabled", True)),
         url=str(raw.get("url", "")),
         max_attempts=int(raw.get("max_attempts", 3)),
@@ -235,11 +235,11 @@ def _parse_notification(raw: Optional[dict]) -> NotificationConfig:
         monitor_instance=str(raw.get("monitor_instance", "monitor-a")),
     )
     if cfg.max_attempts < 1:
-        raise ConfigError("notification.max_attempts 必须 >= 1")
+        raise ConfigError("webhook.max_attempts 必须 >= 1")
     if cfg.max_event_attempts < 1:
-        raise ConfigError("notification.max_event_attempts 必须 >= 1")
+        raise ConfigError("webhook.max_event_attempts 必须 >= 1")
     if cfg.max_backoff_seconds < 1:
-        raise ConfigError("notification.max_backoff_seconds 必须 >= 1")
+        raise ConfigError("webhook.max_backoff_seconds 必须 >= 1")
     # URL 合法性：
     # 1. scheme 必须是 http/https（防止误填 file://、javascript: 等）；
     # 2. netloc 必须非空（防止用户填 "https://" 这种缺主机名的"占位 URL"，
@@ -250,10 +250,10 @@ def _parse_notification(raw: Optional[dict]) -> NotificationConfig:
         parsed = urlparse(cfg.url)
         if parsed.scheme not in ("http", "https"):
             raise ConfigError(
-                f"notification.url 必须是 http 或 https 协议，当前是 {parsed.scheme!r}"
+                f"webhook.url 必须是 http 或 https 协议，当前是 {parsed.scheme!r}"
             )
         if not parsed.netloc:
-            raise ConfigError(f"notification.url 缺少主机名：{cfg.url!r}")
+            raise ConfigError(f"webhook.url 缺少主机名：{cfg.url!r}")
     return cfg
 
 
@@ -369,7 +369,7 @@ def load_config(path: str | Path) -> AppConfig:
         server=_parse_server(raw.get("server")),
         probe=_parse_probe(raw.get("probe")),
         state=_parse_state(raw.get("state")),
-        notification=_parse_notification(raw.get("notification")),
+        webhook=_parse_webhook(raw.get("webhook")),
         storage=_parse_storage(raw.get("storage")),
         targets=_parse_targets(raw.get("targets")),
         cuckoo=_parse_cuckoo(raw.get("cuckoo")),

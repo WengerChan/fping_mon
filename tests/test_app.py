@@ -48,7 +48,7 @@ state:
   down_after_failures: 1
   up_after_successes: 1
 
-notification:
+webhook:
   enabled: false
 
 targets:
@@ -84,7 +84,7 @@ state:
   down_after_failures: 3
   up_after_successes: 3
 
-notification:
+webhook:
   enabled: false
 
 targets:
@@ -117,7 +117,7 @@ server:
   listen: 127.0.0.1
   port: {_free_port()}
 
-notification:
+webhook:
   enabled: false
 """,
     )
