@@ -43,3 +43,10 @@ targets:
     labels:
       site: shanghai
       group: application
+
+# 布谷鸟配置
+cuckoo:
+  app_key: ""
+  url:
+    receivemap: ""
+    # forward: ""

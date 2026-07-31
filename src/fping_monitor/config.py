@@ -11,7 +11,7 @@ import ipaddress
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 import yaml
 
@@ -72,6 +72,13 @@ class StorageConfig:
 
 
 @dataclass
+class CuckooConfig:
+    """布谷鸟告警接口配置。"""
+    app_key: str = ""
+    url: dict[Literal["receivemap", "forward"], str] = field(default_factory=lambda: {"receivemap": "", "forward": ""})
+
+
+@dataclass
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     probe: ProbeConfig = field(default_factory=ProbeConfig)
@@ -79,6 +86,7 @@ class AppConfig:
     notification: NotificationConfig = field(default_factory=NotificationConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     targets: list[Target] = field(default_factory=list)
+    cuckoo: CuckooConfig = field(default_factory=CuckooConfig)
 
 
 def _require(d: dict, key: str, where: str) -> Any:
@@ -229,6 +237,19 @@ def _parse_targets(raw: Any) -> list[Target]:
         out.append(Target(id=target_id, address=address, labels=labels))
     return out
 
+def _parse_cuckoo(raw: Optional[dict]) -> CuckooConfig:
+    if raw is None:
+        raise ConfigError("缺少必填字段 'cuckoo'")
+    app_key = str(raw.get("app_key", ""))
+    url_raw = _require(raw, "url", "cuckoo")
+    if not isinstance(url_raw, dict):
+        raise ConfigError("cuckoo.url 必须是 mapping")
+    url: dict[Literal["receivemap", "forward"], str] = {}
+    for key in ("receivemap", "forward"):
+        url[key] = url_raw.get(key, "")
+    
+    return CuckooConfig(app_key=app_key, url=url)
+        
 
 def load_config(path: str | Path) -> AppConfig:
     """读取并校验 YAML 配置文件。"""
@@ -251,4 +272,5 @@ def load_config(path: str | Path) -> AppConfig:
         notification=_parse_notification(raw.get("notification")),
         storage=_parse_storage(raw.get("storage")),
         targets=_parse_targets(raw.get("targets")),
+        cuckoo=_parse_cuckoo(raw.get("cuckoo")),
     )
