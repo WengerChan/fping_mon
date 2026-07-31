@@ -22,12 +22,13 @@ jobs:
         username: ${{github.actor}}
         password: ${{secrets.GITHUB_TOKEN}}
     - name: Generate image tag
-      id: image-tag
+      id: meta
       uses: docker/metadata-action@v6.2.0
       with:
         images: ghcr.io/${{github.repository_owner}}/fping-monitor
-        tags: ${{github.ref_name}}
-        flavor: latest=auto
+        tags: |
+          type=raw,value=latest,enable={{is_tag}}
+          type=ref,event=tag
     - name: Setup Buildx
       uses: docker/setup-buildx-action@v4.2.0
       with:
@@ -39,8 +40,8 @@ jobs:
         context: .
         platforms: linux/amd64,linux/arm64
         push: true
-        tags: ${{steps.image-tag.outputs.tags}}
-        labels: ${{steps.image-tag.outputs.labels}}
-        provenance: true
-        sbom: true
+        tags: ${{steps.meta.outputs.tags}}
+        labels: ${{steps.meta.outputs.labels}}
+        provenance: false
+        sbom: false
 
