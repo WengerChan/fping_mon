@@ -26,9 +26,17 @@ storage:
   path: /var/lib/fping-monitor/state.db               # SQLite 文件路径
 
 # 监控目标列表
+#
+# address 支持三种语法：
+#   - 单 IP 或主机名：1 个 Target，id 用原值
+#   - CIDR（如 10.1.1.0/24）：展开为网络内的 host IP；/30 及以下全保留，
+#     /29 及以上丢网络号与广播地址
+#   - 区间（如 10.1.1.100-10.1.1.200）：闭区间，包含两端
+#
+# 展开超过 max_expansion 的 target 会被拒绝，防止误写大段把内存打爆。
 targets:
   - id: core-switch-01                                 # 目标 ID，必须唯一
-    address: 10.10.0.1                                 # IP 或主机名，传给 fping
+    address: 10.10.0.1                                 # 单 IP：1 个 Target
     labels:                                            # 静态标签（白名单内）
       site: shanghai
       group: network
@@ -38,6 +46,21 @@ targets:
     labels:
       site: shanghai
       group: application
+
+  - id: subnet-core                                    # 基础 ID；展开后为 subnet-core-1 … subnet-core-254
+    address: 10.1.1.0/24                               # CIDR：254 个 Target（丢 .0/.255）
+    labels:
+      site: shanghai
+      group: network
+
+  - id: range-app                                      # 基础 ID；展开后为 range-app-100 … range-app-200
+    address: 10.1.2.100-10.1.2.200                     # 区间：101 个 Target（闭区间）
+    labels:
+      site: shanghai
+      group: application
+
+# 单 target 展开成多个 host 的上限（约 2 个 C 段）。超出时 ConfigError。
+max_expansion: 512
 
 # Webhook 通知配置
 webhook:

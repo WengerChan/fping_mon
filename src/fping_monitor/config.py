@@ -150,6 +150,8 @@ class AppConfig:
         storage: Outbox 存储。
         targets: 监控目标列表（唯一必填段）。
         cuckoo: 布谷鸟通道。
+        max_expansion: 单个 target.address 展开成多个 host 的上限（防误写大段）；
+            默认 512（约两个 /24）。
     """
     server: ServerConfig = field(default_factory=ServerConfig)
     probe: ProbeConfig = field(default_factory=ProbeConfig)
@@ -158,6 +160,7 @@ class AppConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     targets: list[Target] = field(default_factory=list)
     cuckoo: CuckooConfig = field(default_factory=CuckooConfig)
+    max_expansion: int = 512
 
 
 def _require(d: dict, key: str, where: str) -> Any:
@@ -264,29 +267,108 @@ def _parse_storage(raw: Optional[dict]) -> StorageConfig:
     return StorageConfig(path=str(raw.get("path", "/var/lib/fping-monitor/state.db")))
 
 
-def _validate_address(value: str, target_id: str) -> str:
-    """校验 target.address 是否合法（IP 或主机名）。"""
+def _expand_cidr(network: "ipaddress._BaseNetwork") -> list[str]:
+    """把 ip_network 展开为 host 地址字符串列表。
+
+    /30 及以下（prefix >= 30）全保留：点对点 / 单机场景下网络与广播地址
+    也是合法主机位。/29 及以上（prefix <= 29）丢网络号与广播地址。
+    """
+    if network.prefixlen >= 30:
+        return [str(ip) for ip in network]
+    # prefixlen <= 29：至少 8 个地址，跳过第一个和最后一个
+    return [str(ip) for ip in network.hosts()]
+
+
+def _parse_address_range(start: str, end: str) -> list[str]:
+    """解析 ``a.b.c.d-x.y.z.w`` 区间，闭区间，包含两端。"""
+    try:
+        ip_start = ipaddress.ip_address(start)
+        ip_end = ipaddress.ip_address(end)
+    except ValueError as exc:
+        raise ConfigError(f"区间端点不是合法 IP: {exc}") from exc
+    if ip_start.version != ip_end.version:
+        raise ConfigError(
+            f"区间两端 IP family 不一致: {start!r} 是 v{ip_start.version}, "
+            f"{end!r} 是 v{ip_end.version}"
+        )
+    if ip_start > ip_end:
+        raise ConfigError(
+            f"区间起点 {start!r} 大于终点 {end!r}"
+        )
+    return [str(ipaddress.ip_address(i)) for i in range(int(ip_start), int(ip_end) + 1)]
+
+
+def _parse_address(value: str) -> list[str]:
+    """把 address 字符串展开为 1~N 个 host IP 字符串。
+
+    支持的语法：
+      * 单 IP：``10.1.1.1``
+      * CIDR：``10.1.1.0/24``（展开为网络内的 host IP）
+      * 区间：``10.1.1.100-10.1.1.200``（闭区间，包含两端）
+      * 主机名：原样返回（仅一项）
+    """
     if not value:
-        raise ConfigError(f"target {target_id!r}: address 不能为空")
-    # 先尝试按字面 IP 解析（v4 / v6），否则按主机名校验
+        raise ConfigError("address 不能为空")
+
+    # 1) 单 IP
     try:
         ipaddress.ip_address(value)
-        return value
+        return [value]
     except ValueError:
         pass
+
+    # 2) CIDR
+    if "/" in value:
+        try:
+            network = ipaddress.ip_network(value, strict=False)
+        except ValueError as exc:
+            raise ConfigError(f"address {value!r} 不是合法的 CIDR: {exc}") from exc
+        return _expand_cidr(network)
+
+    # 3) 区间：要求按 "-" 拆开后两端都是合法 IP（v4/v6 同 family）
+    if "-" in value:
+        parts = value.split("-", 1)
+        if len(parts) == 2 and parts[0] and parts[1]:
+            try:
+                start_ip = ipaddress.ip_address(parts[0])
+                end_ip = ipaddress.ip_address(parts[1])
+            except ValueError:
+                # 两端不是 IP：当作主机名（含合法连字符的主机名很常见）
+                pass
+            else:
+                if start_ip.version != end_ip.version:
+                    raise ConfigError(
+                        f"区间两端 IP family 不一致: {parts[0]!r} 是 v{start_ip.version}, "
+                        f"{parts[1]!r} 是 v{end_ip.version}"
+                    )
+                if start_ip > end_ip:
+                    raise ConfigError(
+                        f"区间起点 {parts[0]!r} 大于终点 {parts[1]!r}"
+                    )
+                return [
+                    str(ipaddress.ip_address(i))
+                    for i in range(int(start_ip), int(end_ip) + 1)
+                ]
+
+    # 4) 主机名
     if not _HOST_RE.match(value) or value.startswith("-"):
-        raise ConfigError(
-            f"target {target_id!r}: address {value!r} 不是合法的 IP 或主机名"
-        )
-    return value
+        raise ConfigError(f"address {value!r} 不是合法的 IP 或主机名")
+    return [value]
 
 
-def _parse_targets(raw: Any) -> list[Target]:
-    """解析 ``targets`` 段，校验 id/address/labels。"""
+def _parse_targets(raw: Any, max_expansion: int = 512) -> list[Target]:
+    """解析 ``targets`` 段，校验 id/address/labels；CIDR/区间展开成多个 Target。
+
+    单 IP/主机名 → 1 个 Target，id 用原值。
+    CIDR/区间     → N 个 Target，id 形如 ``"{原id}-{ip末段}"``（IPv4 用末段；
+                   IPv6 用完整地址末段避免冲突）。
+    """
     if raw is None:
         return []
     if not isinstance(raw, list):
         raise ConfigError("'targets' 必须是 list")
+    if max_expansion < 1:
+        raise ConfigError("max_expansion 必须 >= 1")
     seen: set[str] = set()
     out: list[Target] = []
     for index, item in enumerate(raw):
@@ -300,9 +382,6 @@ def _parse_targets(raw: Any) -> list[Target]:
         if target_id in seen:
             raise ConfigError(f"重复的 target id: {target_id!r}")
         seen.add(target_id)
-        address = _validate_address(
-            str(_require(item, "address", f"targets[{index}]")), target_id
-        )
         labels_raw = item.get("labels", {}) or {}
         if not isinstance(labels_raw, dict):
             raise ConfigError(f"targets[{index}].labels 必须是 mapping")
@@ -313,7 +392,40 @@ def _parse_targets(raw: Any) -> list[Target]:
                     f"target {target_id!r}: 标签键 {k!r} 不在白名单中"
                 )
             labels[k] = str(v)
-        out.append(Target(id=target_id, address=address, labels=labels))
+
+        addresses = _parse_address(str(_require(item, "address", f"targets[{index}]")))
+        if len(addresses) > max_expansion:
+            raise ConfigError(
+                f"target {target_id!r}: address 展开为 {len(addresses)} 个 host，"
+                f"超过 max_expansion={max_expansion}；"
+                f"若确需更大范围请显式调高 max_expansion"
+            )
+
+        if len(addresses) == 1:
+            # 单 host：id 沿用原值
+            if target_id in seen:
+                pass  # 已在前面查过；保留防御
+            if target_id in {t.id for t in out}:
+                raise ConfigError(f"重复的 target id: {target_id!r}")
+            out.append(Target(id=target_id, address=addresses[0], labels=labels))
+        else:
+            # 多 host：每个生成一个独立 id。
+            # suffix 用 IP 末两段（10.1.1.1 → "1.1"；10.1.0.10 → "0.10"），
+            # 保证 /22 以内的展开不撞；超过 /22 仍可能撞，但 max_expansion=512
+            # 已能覆盖两个 /24，再大就该手工分组。
+            for ip_str in addresses:
+                if ":" in ip_str:
+                    seg = ip_str.rsplit(":", 2)[-2:]
+                    suffix = "-".join(seg)
+                else:
+                    suffix = ".".join(ip_str.rsplit(".", 2)[-2:])
+                new_id = f"{target_id}-{suffix}"
+                if new_id in seen or new_id in {t.id for t in out}:
+                    raise ConfigError(
+                        f"target {target_id!r}: 展开后生成的 id {new_id!r} 重复"
+                    )
+                seen.add(new_id)
+                out.append(Target(id=new_id, address=ip_str, labels=dict(labels)))
     return out
 
 
@@ -365,12 +477,16 @@ def load_config(path: str | Path) -> AppConfig:
     if not isinstance(raw, dict):
         raise ConfigError("配置根节点必须是 mapping")
 
+    max_expansion = int(raw.get("max_expansion", 512))
+    if max_expansion < 1:
+        raise ConfigError("max_expansion 必须 >= 1")
     return AppConfig(
         server=_parse_server(raw.get("server")),
         probe=_parse_probe(raw.get("probe")),
         state=_parse_state(raw.get("state")),
         webhook=_parse_webhook(raw.get("webhook")),
         storage=_parse_storage(raw.get("storage")),
-        targets=_parse_targets(raw.get("targets")),
+        targets=_parse_targets(raw.get("targets"), max_expansion=max_expansion),
         cuckoo=_parse_cuckoo(raw.get("cuckoo")),
+        max_expansion=max_expansion,
     )
