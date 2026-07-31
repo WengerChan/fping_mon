@@ -11,11 +11,15 @@ import ipaddress
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Literal
+import logging
+from typing import Any, Optional
 
 import yaml
 
 from .models import Target
+
+
+_LOG = logging.getLogger(__name__)
 
 
 # 标签键白名单，未来可能作为指标标签使用
@@ -75,7 +79,9 @@ class StorageConfig:
 class CuckooConfig:
     """布谷鸟告警接口配置。"""
     app_key: str = ""
-    url: dict[Literal["receivemap", "forward"], str] = field(default_factory=lambda: {"receivemap": "", "forward": ""})
+    url: dict[str, str] = field(
+        default_factory=lambda: {"receivemap": "", "forward": ""}
+    )
 
 
 @dataclass
@@ -238,16 +244,22 @@ def _parse_targets(raw: Any) -> list[Target]:
     return out
 
 def _parse_cuckoo(raw: Optional[dict]) -> CuckooConfig:
+    """解析 cuckoo 段。未配置时退化为默认空配置，便于未启用布谷鸟的场景。"""
     if raw is None:
-        raise ConfigError("缺少必填字段 'cuckoo'")
+        return CuckooConfig()
     app_key = str(raw.get("app_key", ""))
-    url_raw = _require(raw, "url", "cuckoo")
+    url_raw = raw.get("url")
+    if url_raw is None:
+        url_raw = {}
     if not isinstance(url_raw, dict):
         raise ConfigError("cuckoo.url 必须是 mapping")
-    url: dict[Literal["receivemap", "forward"], str] = {}
+    url: dict[str, str] = {}
     for key in ("receivemap", "forward"):
-        url[key] = url_raw.get(key, "")
-    
+        value = url_raw.get(key, "")
+        if not value:
+            _LOG.warning("cuckoo.url.%s 未配置", key)
+        url[key] = str(value) if value is not None else ""
+
     return CuckooConfig(app_key=app_key, url=url)
         
 
