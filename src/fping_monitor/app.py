@@ -23,7 +23,7 @@ from .config import AppConfig, load_config
 from .cuckoo import Cuckoo
 from .metrics import MetricsStore
 from .notifications import CuckooNotifier, Notifier, WebhookNotifier
-from .outbox import OutboxNotifier, OutboxWorker, build_channels
+from .outbox import OutboxNotifier, OutboxWorker, _NullOutboxNotifier, build_channels
 from .scheduler import Scheduler
 from .state import StateManager
 from .storage import Outbox
@@ -94,7 +94,7 @@ class Application:
     state_manager: StateManager
     transports: dict[str, Notifier]
     outbox: Outbox
-    outbox_notifier: OutboxNotifier
+    outbox_notifier: "OutboxNotifier | _NullOutboxNotifier"
     outbox_worker: "OutboxWorker | _NullOutboxWorker"
     scheduler: Scheduler
     http_server: MetricsHTTPServer
@@ -250,9 +250,11 @@ def bootstrap(
             (max_a for _, max_a in channels), default=10
         ),
     )
-    outbox_notifier = OutboxNotifier(outbox, channels=channels)
     transports = _build_transports(config)
     if transports:
+        outbox_notifier: "OutboxNotifier | _NullOutboxNotifier" = OutboxNotifier(
+            outbox, channels=channels
+        )
         outbox_worker: "OutboxWorker | _NullOutboxWorker" = OutboxWorker(
             outbox,
             transports,
@@ -261,7 +263,9 @@ def bootstrap(
             metrics=metrics,
         )
     else:
-        # 未启用任何 channel：outbox 仍存在（enqueue 仍可用），但 worker 不启动
+        # 未启用任何 channel：worker 不启动，notifier 是 no-op，
+        # scheduler 仍按原路径调用 notifier.send（不会真投递）。
+        outbox_notifier = _NullOutboxNotifier()
         outbox_worker = _NullOutboxWorker()
 
     scheduler = Scheduler(

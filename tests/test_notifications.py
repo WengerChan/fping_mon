@@ -37,12 +37,22 @@ def test_should_retry_logic():
 
 
 def test_compute_backoff_grows_and_caps():
-    assert compute_backoff(1, 60, 5) == 1.0
-    assert compute_backoff(2, 60, 5) == 2.0
-    assert compute_backoff(3, 60, 5) == 4.0
-    assert compute_backoff(4, 60, 5) == 8.0
+    # jitter_ratio=0 关闭抖动，断言精确值；生产路径默认有 ±10% 抖动
+    assert compute_backoff(1, 60, 5, jitter_ratio=0.0) == 1.0
+    assert compute_backoff(2, 60, 5, jitter_ratio=0.0) == 2.0
+    assert compute_backoff(3, 60, 5, jitter_ratio=0.0) == 4.0
+    assert compute_backoff(4, 60, 5, jitter_ratio=0.0) == 8.0
     # attempt == max_attempts 表示已到上限；-1 是停止信号
-    assert compute_backoff(5, 60, 5) == -1.0
+    assert compute_backoff(5, 60, 5, jitter_ratio=0.0) == -1.0
+
+
+def test_compute_backoff_within_jitter_bounds():
+    """默认 ±10% 抖动：返回值在 [base * 0.9, base * 1.1] 之间。"""
+    for n in (1, 2, 3, 4):
+        base = min(2 ** (n - 1), 60)
+        for _ in range(20):
+            d = compute_backoff(n, 60, 10)  # 不传 jitter_ratio，用默认 0.1
+            assert base * 0.9 - 1e-9 <= d <= base * 1.1 + 1e-9
 
 
 @pytest.mark.asyncio

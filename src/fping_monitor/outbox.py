@@ -63,6 +63,21 @@ class OutboxNotifier:
         await asyncio.to_thread(self._outbox.enqueue, event, self._channels)
 
 
+class _NullOutboxNotifier:
+    """未启用任何 channel 时使用的占位 notifier：send 是 no-op。
+
+    让 bootstrap 在用户未配置任何告警通道时也能正常启动，
+    scheduler 端不需要判 notifier 是否为 None。
+    """
+
+    @property
+    def channels(self) -> list[tuple[str, int]]:
+        return []
+
+    async def send(self, event: AlertEvent) -> None:
+        return None
+
+
 class OutboxWorker:
     """后台协程：定期消费 outbox 中的待发送行。
 

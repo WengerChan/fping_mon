@@ -189,13 +189,15 @@ class Outbox:
                     time.time(),
                 ),
             )
-            outbox_id = cur.lastrowid
-            if outbox_id == 0 or outbox_id is None:
-                # event_id UNIQUE 冲突：去查已有的 id
-                row = self._conn.execute(
-                    "SELECT id FROM outbox WHERE event_id=?", (event.event_id,)
-                ).fetchone()
-                outbox_id = row["id"]
+            # INSERT OR IGNORE 命中已有 event_id 时，lastrowid 行为依赖 SQLite
+            # 版本（>=3.35 写入原 rowid，否则 0）；统一以 event_id 回查判定。
+            row = self._conn.execute(
+                "SELECT id FROM outbox WHERE event_id=?", (event.event_id,)
+            ).fetchone()
+            outbox_id = row["id"]
+            inserted = cur.rowcount == 1
+            if not inserted:
+                # 主表行已存在，子表行可能也已存在；什么都不做，保证幂等。
                 return outbox_id
             now = time.time()
             self._conn.executemany(

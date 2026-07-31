@@ -420,9 +420,12 @@ def should_retry(status_code: Optional[int]) -> bool:  # 测试使用的公开�
 
 
 def compute_backoff(
-    attempts: int, max_backoff_seconds: int, max_attempts: int
+    attempts: int,
+    max_backoff_seconds: int,
+    max_attempts: int,
+    jitter_ratio: float = 0.1,
 ) -> float:
     """兼容旧 API：传入 max_attempts 仅用于判断上界（>=时返回 -1）。"""
     if attempts >= max_attempts:
         return -1.0
-    return _compute_backoff(attempts, max_backoff_seconds)
+    return _compute_backoff(attempts, max_backoff_seconds, jitter_ratio)
